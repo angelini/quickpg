@@ -5,11 +5,15 @@ use std::{
     str,
 };
 
+use fs_extra::dir::CopyOptions;
 use regex::Regex;
+
+use crate::config::PostgresqlConf;
 
 #[derive(Debug, Responder)]
 pub enum Error {
     Io(io::Error),
+    FsExtra(String),
     CliError(String),
     InvalidOutput(String),
 }
@@ -17,6 +21,12 @@ pub enum Error {
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Self {
         Error::Io(err)
+    }
+}
+
+impl From<fs_extra::error::Error> for Error {
+    fn from(err: fs_extra::error::Error) -> Self {
+        Error::FsExtra(err.to_string())
     }
 }
 
@@ -40,9 +50,9 @@ impl PgCtl {
         }
     }
 
-    pub fn init(&self, name: &str, conf: &crate::config::PostgresqlConf) -> Result<()> {
+    pub fn init(&self, name: &str, conf: &PostgresqlConf) -> Result<()> {
         let output = Command::new(&self.binary)
-            .args(["-D", &self.data_dir(name), "init"])
+            .args(["--pgdata", &self.data_dir(name), "-o--no-sync", "init"])
             .output()?;
 
         PgCtl::check_output(&output)?;
@@ -65,12 +75,13 @@ impl PgCtl {
 
         let output = Command::new(&self.binary)
             .args([
-                "-D",
+                "--pgdata",
                 &self.data_dir(name),
-                "-l",
+                "--log",
                 &self.log_file(name),
-                "-o",
+                "--options",
                 &format!("-k{}", absolute_sockets),
+                "--no-wait",
                 "start",
             ])
             .output()?;
@@ -80,7 +91,7 @@ impl PgCtl {
 
     pub fn status(&self, name: &str) -> Result<Option<u32>> {
         let output = Command::new(&self.binary)
-            .args(["-D", &self.data_dir(name), "status"])
+            .args(["--pgdata", &self.data_dir(name), "status"])
             .output()?;
 
         let stdout = str::from_utf8(&output.stdout).unwrap().to_string();
@@ -100,10 +111,30 @@ impl PgCtl {
 
     pub fn stop(&self, name: &str) -> Result<()> {
         let output = Command::new(&self.binary)
-            .args(["-D", &self.data_dir(name), "stop"])
+            .args(["--pgdata", &self.data_dir(name), "--no-wait", "stop"])
             .output()?;
 
         PgCtl::check_output(&output)
+    }
+
+    pub fn fork(&self, template: &str, target: &str, conf: &PostgresqlConf) -> Result<()> {
+        let options = CopyOptions {
+            overwrite: false,
+            skip_exist: false,
+            buffer_size: 64000, //64kb
+            copy_inside: true,
+            content_only: false,
+            depth: 0,
+        };
+
+        // FIXME: Incorrect data dir permissions
+
+        fs_extra::dir::copy(self.data.join(template), self.data.join(target), &options)?;
+
+        conf.to_config()
+            .to_file(&self.data.join(target).join("postgresql.conf"))?;
+
+        return Ok(());
     }
 
     pub fn list(&self) -> Result<Vec<(String, Option<u32>)>> {
