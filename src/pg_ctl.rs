@@ -86,7 +86,6 @@ impl PgCtl {
                 &join_str(&self.logs, &*format!("{}.log", name)),
                 "--options",
                 &format!("-k{}", absolute_sockets),
-                // "--no-wait",
                 "start",
             ])
             .output()?;
@@ -116,7 +115,7 @@ impl PgCtl {
 
     pub fn stop(&self, name: &str) -> Result<()> {
         let output = Command::new(&self.binary)
-            .args(["--pgdata", &join_str(&self.data, name), "--no-wait", "stop"])
+            .args(["--pgdata", &join_str(&self.data, name), "stop"])
             .output()?;
 
         PgCtl::check_output(&output)
@@ -133,6 +132,17 @@ impl PgCtl {
             .to_file(&self.data.join(target).join("postgresql.conf"))?;
 
         return Ok(());
+    }
+
+    pub fn destroy(&self, name: &str) -> Result<()> {
+        let log = self.logs.join(format!("{}.log", name));
+
+        fs::remove_dir_all(self.data.join(name))?;
+        if log.is_file() {
+            fs::remove_file(self.logs.join(format!("{}.log", name)))?;
+        }
+
+        Ok(())
     }
 
     pub fn list(&self) -> Result<Vec<(String, Option<u32>)>> {

@@ -125,24 +125,36 @@ fn fork(body: Json<InstanceId>) -> Result<Json<InstanceId>> {
     Ok(Json(InstanceId { name }))
 }
 
+#[post("/destroy", data = "<body>")]
+fn destroy(body: Json<InstanceId>) -> Result<Json<()>> {
+    let ctl = create_ctl();
+
+    if let Some(_) = ctl.status(&body.name)? {
+        ctl.stop(&body.name)?;
+    }
+
+    ctl.destroy(&body.name)?;
+    Ok(Json(()))
+}
+
 #[derive(Deserialize, Serialize)]
 #[serde(crate = "rocket::serde")]
 struct RootStatus<'a> {
     name: &'a str,
-    statuses: Vec<(String, Option<u32>)>,
+    instances: Vec<(String, Option<u32>)>,
 }
 
 #[get("/")]
 fn index<'a>() -> Result<Json<RootStatus<'a>>> {
     let ctl = create_ctl();
-    let statuses = ctl.list()?;
+    let instances = ctl.list()?;
     Ok(Json(RootStatus {
         name: "quickpg",
-        statuses,
+        instances,
     }))
 }
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/", routes![index, create, start, stop, fork])
+    rocket::build().mount("/", routes![index, create, start, stop, fork, destroy])
 }
