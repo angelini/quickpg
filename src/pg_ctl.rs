@@ -52,7 +52,12 @@ impl PgCtl {
 
     pub fn init(&self, name: &str, conf: &PostgresqlConf) -> Result<()> {
         let output = Command::new(&self.binary)
-            .args(["--pgdata", &self.data_dir(name), "-o--no-sync", "init"])
+            .args([
+                "--pgdata",
+                &join_str(&self.data, name),
+                "-o--no-sync",
+                "init",
+            ])
             .output()?;
 
         PgCtl::check_output(&output)?;
@@ -76,12 +81,12 @@ impl PgCtl {
         let output = Command::new(&self.binary)
             .args([
                 "--pgdata",
-                &self.data_dir(name),
+                &join_str(&self.data, name),
                 "--log",
-                &self.log_file(name),
+                &join_str(&self.logs, &*format!("{}.log", name)),
                 "--options",
                 &format!("-k{}", absolute_sockets),
-                "--no-wait",
+                // "--no-wait",
                 "start",
             ])
             .output()?;
@@ -91,7 +96,7 @@ impl PgCtl {
 
     pub fn status(&self, name: &str) -> Result<Option<u32>> {
         let output = Command::new(&self.binary)
-            .args(["--pgdata", &self.data_dir(name), "status"])
+            .args(["--pgdata", &join_str(&self.data, name), "status"])
             .output()?;
 
         let stdout = str::from_utf8(&output.stdout).unwrap().to_string();
@@ -111,25 +116,18 @@ impl PgCtl {
 
     pub fn stop(&self, name: &str) -> Result<()> {
         let output = Command::new(&self.binary)
-            .args(["--pgdata", &self.data_dir(name), "--no-wait", "stop"])
+            .args(["--pgdata", &join_str(&self.data, name), "--no-wait", "stop"])
             .output()?;
 
         PgCtl::check_output(&output)
     }
 
     pub fn fork(&self, template: &str, target: &str, conf: &PostgresqlConf) -> Result<()> {
-        let options = CopyOptions {
-            overwrite: false,
-            skip_exist: false,
-            buffer_size: 64000, //64kb
-            copy_inside: true,
-            content_only: false,
-            depth: 0,
-        };
-
-        // FIXME: Incorrect data dir permissions
-
-        fs_extra::dir::copy(self.data.join(template), self.data.join(target), &options)?;
+        fs_extra::dir::copy(
+            self.data.join(template),
+            self.data.join(target),
+            &CopyOptions::new(),
+        )?;
 
         conf.to_config()
             .to_file(&self.data.join(target).join("postgresql.conf"))?;
@@ -149,17 +147,6 @@ impl PgCtl {
         Ok(results)
     }
 
-    fn data_dir(&self, name: &str) -> String {
-        self.data.join(name).to_string_lossy().into_owned()
-    }
-
-    fn log_file(&self, name: &str) -> String {
-        self.logs
-            .join(format!("{}.log", name))
-            .to_string_lossy()
-            .into_owned()
-    }
-
     fn check_output(output: &Output) -> Result<()> {
         if output.status.success() {
             Ok(())
@@ -169,4 +156,8 @@ impl PgCtl {
             ))
         }
     }
+}
+
+fn join_str<'a, S: Into<&'a str>>(directory: &Path, name: S) -> String {
+    directory.join(name.into()).to_string_lossy().into_owned()
 }
