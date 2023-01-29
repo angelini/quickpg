@@ -19,7 +19,7 @@ main() {
     log "  > created: ${target}"
 
     log "Start instance"
-    curl -sS --fail-with-body -XPOST -d "{\"name\": \"${target}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/start
+    curl -sS --fail-with-body -XPOST -d "{\"name\": \"${target}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/start | jq .
 }
 
 main "$@"

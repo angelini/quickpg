@@ -8,7 +8,7 @@ use std::{
 use fs_extra::dir::CopyOptions;
 use regex::Regex;
 
-use crate::config::PostgresqlConf;
+use crate::config::{self, PostgresqlConf};
 
 #[derive(Debug, Responder)]
 pub enum Error {
@@ -145,13 +145,15 @@ impl PgCtl {
         Ok(())
     }
 
-    pub fn list(&self) -> Result<Vec<(String, Option<u32>)>> {
+    pub fn list(&self) -> Result<Vec<(String, u32, Option<u32>)>> {
         let mut results = vec![];
 
         for entry in fs::read_dir(&self.data)? {
-            let name = entry?.file_name().to_string_lossy().into_owned();
+            let entry = entry?;
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let port = config::read_port(&entry.path().join("postgresql.conf"))?;
             let pid = self.status(&name)?;
-            results.push((name, pid))
+            results.push((name, port, pid))
         }
 
         Ok(results)

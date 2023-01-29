@@ -8,8 +8,8 @@ log() {
 
 main() {
     log "Loading instances"
-    local instances=$(curl -s localhost:8000 | jq -r '.instances[] | .[0]')
-    local running=$(curl -s localhost:8000 | jq -r '.instances[] | select(.[1] | .!=null) | .[0]')
+    local instances=$(curl -s localhost:8000 | jq -r '.instances[] | .name')
+    local running=$(curl -s localhost:8000 | jq -r '.instances[] | select(.proc_info | .!=null) | .name')
 
     for instance in $running
     do

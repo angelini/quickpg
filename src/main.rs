@@ -59,9 +59,53 @@ type Result<T> = std::result::Result<T, ApiError>;
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(crate = "rocket::serde")]
-struct Instance {
+enum InstanceState {
+    Stopped,
+    Running,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(crate = "rocket::serde")]
+struct ProcessInfo {
     pid: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(crate = "rocket::serde")]
+struct ConnectionInfo {
+    user: String,
+    host: String,
     port: u32,
+    dbname: String,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(crate = "rocket::serde")]
+struct Instance {
+    name: String,
+    state: InstanceState,
+    conn_info: ConnectionInfo,
+    proc_info: Option<ProcessInfo>,
+}
+
+impl Instance {
+    fn new(name: impl Into<String>, port: u32, pid: Option<u32>) -> Instance {
+        let state = match pid {
+            Some(_) => InstanceState::Running,
+            None => InstanceState::Stopped,
+        };
+        Instance {
+            name: name.into(),
+            state,
+            conn_info: ConnectionInfo {
+                user: "".to_string(),
+                host: "127.0.0.1".to_string(),
+                port,
+                dbname: "postgres".to_string(),
+            },
+            proc_info: pid.map(|p| ProcessInfo { pid: p }),
+        }
+    }
 }
 
 fn create_ctl() -> pg_ctl::PgCtl {
@@ -91,7 +135,7 @@ fn start(body: Json<InstanceId>) -> Result<Json<Instance>> {
     ctl.start(&body.name)?;
 
     match ctl.status(&body.name)? {
-        Some(pid) => Ok(Json(Instance { pid, port })),
+        Some(pid) => Ok(Json(Instance::new(&body.name, port, Some(pid)))),
         None => Err(ApiError::Internal(InternalError::json(format!(
             "not running: {}",
             body.name
@@ -137,24 +181,25 @@ fn destroy(body: Json<InstanceId>) -> Result<Json<()>> {
     Ok(Json(()))
 }
 
-#[derive(Deserialize, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(crate = "rocket::serde")]
-struct RootStatus<'a> {
-    name: &'a str,
-    instances: Vec<(String, Option<u32>)>,
+struct ListResponse {
+    instances: Vec<Instance>,
 }
 
 #[get("/")]
-fn index<'a>() -> Result<Json<RootStatus<'a>>> {
+fn list() -> Result<Json<ListResponse>> {
     let ctl = create_ctl();
     let instances = ctl.list()?;
-    Ok(Json(RootStatus {
-        name: "quickpg",
-        instances,
+    Ok(Json(ListResponse {
+        instances: instances
+            .into_iter()
+            .map(|(name, port, pid)| Instance::new(name, port, pid))
+            .collect(),
     }))
 }
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/", routes![index, create, start, stop, fork, destroy])
+    rocket::build().mount("/", routes![list, create, start, stop, fork, destroy])
 }
