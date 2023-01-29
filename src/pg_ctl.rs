@@ -145,14 +145,19 @@ impl PgCtl {
         Ok(())
     }
 
+    pub fn get(&self, name: &str) -> Result<(u32, Option<u32>)> {
+        let port = config::read_port(&self.data.join(name).join("postgresql.conf"))?;
+        let pid = self.status(&name)?;
+        Ok((port, pid))
+    }
+
     pub fn list(&self) -> Result<Vec<(String, u32, Option<u32>)>> {
         let mut results = vec![];
 
         for entry in fs::read_dir(&self.data)? {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            let port = config::read_port(&entry.path().join("postgresql.conf"))?;
-            let pid = self.status(&name)?;
+            let (port, pid) = self.get(&name)?;
             results.push((name, port, pid))
         }
 

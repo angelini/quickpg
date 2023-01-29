@@ -112,7 +112,32 @@ fn create_ctl() -> pg_ctl::PgCtl {
     pg_ctl::PgCtl::new(Path::new(""))
 }
 
-#[post("/create")]
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(crate = "rocket::serde")]
+struct ListResponse {
+    instances: Vec<Instance>,
+}
+
+#[get("/", format = "json")]
+fn list() -> Result<Json<ListResponse>> {
+    let ctl = create_ctl();
+    let instances = ctl.list()?;
+    Ok(Json(ListResponse {
+        instances: instances
+            .into_iter()
+            .map(|(name, port, pid)| Instance::new(name, port, pid))
+            .collect(),
+    }))
+}
+
+#[get("/status/<name>", format = "json")]
+fn status(name: &str) -> Result<Json<Instance>> {
+    let ctl = create_ctl();
+    let (port, pid) = ctl.get(name)?;
+    Ok(Json(Instance::new(name, port, pid)))
+}
+
+#[post("/create", format = "json")]
 fn create() -> Result<Json<InstanceId>> {
     let ctl = create_ctl();
     let port: u32 = portpicker::pick_unused_port().unwrap().into();
@@ -123,7 +148,7 @@ fn create() -> Result<Json<InstanceId>> {
     Ok(InstanceId::json(name))
 }
 
-#[post("/start", data = "<body>")]
+#[post("/start", data = "<body>", format = "json")]
 fn start(body: Json<InstanceId>) -> Result<Json<Instance>> {
     let ctl = create_ctl();
     let port: u32 = portpicker::pick_unused_port().unwrap().into();
@@ -143,14 +168,14 @@ fn start(body: Json<InstanceId>) -> Result<Json<Instance>> {
     }
 }
 
-#[post("/stop", data = "<body>")]
+#[post("/stop", data = "<body>", format = "json")]
 fn stop(body: Json<InstanceId>) -> Result<Json<()>> {
     let ctl = create_ctl();
     ctl.stop(&body.name)?;
     Ok(Json(()))
 }
 
-#[post("/fork", data = "<body>")]
+#[post("/fork", data = "<body>", format = "json")]
 fn fork(body: Json<InstanceId>) -> Result<Json<InstanceId>> {
     let ctl = create_ctl();
     let port: u32 = portpicker::pick_unused_port().unwrap().into();
@@ -169,7 +194,7 @@ fn fork(body: Json<InstanceId>) -> Result<Json<InstanceId>> {
     Ok(Json(InstanceId { name }))
 }
 
-#[post("/destroy", data = "<body>")]
+#[post("/destroy", data = "<body>", format = "json")]
 fn destroy(body: Json<InstanceId>) -> Result<Json<()>> {
     let ctl = create_ctl();
 
@@ -181,25 +206,10 @@ fn destroy(body: Json<InstanceId>) -> Result<Json<()>> {
     Ok(Json(()))
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(crate = "rocket::serde")]
-struct ListResponse {
-    instances: Vec<Instance>,
-}
-
-#[get("/")]
-fn list() -> Result<Json<ListResponse>> {
-    let ctl = create_ctl();
-    let instances = ctl.list()?;
-    Ok(Json(ListResponse {
-        instances: instances
-            .into_iter()
-            .map(|(name, port, pid)| Instance::new(name, port, pid))
-            .collect(),
-    }))
-}
-
 #[launch]
 fn rocket() -> _ {
-    rocket::build().mount("/", routes![list, create, start, stop, fork, destroy])
+    rocket::build().mount(
+        "/",
+        routes![list, status, create, start, stop, fork, destroy],
+    )
 }
