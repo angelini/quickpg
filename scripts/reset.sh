@@ -8,19 +8,19 @@ log() {
 
 main() {
     log "Loading instances"
-    local instances=$(curl -s localhost:8000 | jq -r '.instances[] | .name')
-    local running=$(curl -s localhost:8000 | jq -r '.instances[] | select(.proc_info | .!=null) | .name')
+    local instances=$(curl -s localhost:8000 | jq -r '.instances[] | .id')
+    local running=$(curl -s localhost:8000 | jq -r '.instances[] | select(.proc_info | .!=null) | .id')
 
-    for instance in $running
+    for id in $running
     do
-        log "Stop ${instance}"
-        curl -fsS -XPOST -d "{\"name\": \"${instance}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/stop > /dev/null
+        log "Stop ${id}"
+        curl -fsS -XPOST -d "{\"id\": \"${id}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/stop > /dev/null
     done
 
-    for instance in $instances
+    for id in $instances
     do
-        log "Delete ${instance}"
-        curl -fsS -XPOST -d "{\"name\": \"${instance}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/destroy > /dev/null
+        log "Delete ${id}"
+        curl -fsS -XPOST -d "{\"id\": \"${id}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/destroy > /dev/null
     done
 }
 

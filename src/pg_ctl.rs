@@ -50,29 +50,24 @@ impl PgCtl {
         }
     }
 
-    pub fn init(&self, name: &str, conf: &PostgresqlConf) -> Result<()> {
+    pub fn init(&self, id: &str, conf: &PostgresqlConf) -> Result<()> {
         let output = Command::new(&self.binary)
-            .args([
-                "--pgdata",
-                &join_str(&self.data, name),
-                "-o--no-sync",
-                "init",
-            ])
+            .args(["--pgdata", &join_str(&self.data, id), "-o--no-sync", "init"])
             .output()?;
 
         PgCtl::check_output(&output)?;
 
         conf.to_config()
-            .to_file(&self.data.join(name).join("postgresql.conf"))?;
+            .to_file(&self.data.join(id).join("postgresql.conf"))?;
 
         Ok(())
     }
 
-    pub fn exists(&self, name: &str) -> bool {
-        self.data.join(name).is_dir()
+    pub fn exists(&self, id: &str) -> bool {
+        self.data.join(id).is_dir()
     }
 
-    pub fn start(&self, name: &str) -> Result<()> {
+    pub fn start(&self, id: &str) -> Result<()> {
         let absolute_sockets = env::current_dir()?
             .join(&self.sockets)
             .to_string_lossy()
@@ -81,9 +76,9 @@ impl PgCtl {
         let output = Command::new(&self.binary)
             .args([
                 "--pgdata",
-                &join_str(&self.data, name),
+                &join_str(&self.data, id),
                 "--log",
-                &join_str(&self.logs, &*format!("{}.log", name)),
+                &join_str(&self.logs, &*format!("{}.log", id)),
                 "--options",
                 &format!("-k{}", absolute_sockets),
                 "start",
@@ -93,11 +88,11 @@ impl PgCtl {
         PgCtl::check_output(&output)
     }
 
-    pub fn status(&self, name: &str) -> Result<(u32, Option<u32>)> {
-        let port = config::read_port(&self.data.join(name).join("postgresql.conf"))?;
+    pub fn status(&self, id: &str) -> Result<(u32, Option<u32>)> {
+        let port = config::read_port(&self.data.join(id).join("postgresql.conf"))?;
 
         let output = Command::new(&self.binary)
-            .args(["--pgdata", &join_str(&self.data, name), "status"])
+            .args(["--pgdata", &join_str(&self.data, id), "status"])
             .output()?;
         let stdout = str::from_utf8(&output.stdout).unwrap().to_string();
 
@@ -114,9 +109,9 @@ impl PgCtl {
         }
     }
 
-    pub fn stop(&self, name: &str) -> Result<()> {
+    pub fn stop(&self, id: &str) -> Result<()> {
         let output = Command::new(&self.binary)
-            .args(["--pgdata", &join_str(&self.data, name), "stop"])
+            .args(["--pgdata", &join_str(&self.data, id), "stop"])
             .output()?;
 
         PgCtl::check_output(&output)
@@ -135,12 +130,12 @@ impl PgCtl {
         return Ok(());
     }
 
-    pub fn destroy(&self, name: &str) -> Result<()> {
-        let log = self.logs.join(format!("{}.log", name));
+    pub fn destroy(&self, id: &str) -> Result<()> {
+        let log = self.logs.join(format!("{}.log", id));
 
-        fs::remove_dir_all(self.data.join(name))?;
+        fs::remove_dir_all(self.data.join(id))?;
         if log.is_file() {
-            fs::remove_file(self.logs.join(format!("{}.log", name)))?;
+            fs::remove_file(self.logs.join(format!("{}.log", id)))?;
         }
 
         Ok(())
@@ -151,9 +146,9 @@ impl PgCtl {
 
         for entry in fs::read_dir(&self.data)? {
             let entry = entry?;
-            let name = entry.file_name().to_string_lossy().into_owned();
-            let (port, pid) = self.status(&name)?;
-            results.push((name, port, pid))
+            let id = entry.file_name().to_string_lossy().into_owned();
+            let (port, pid) = self.status(&id)?;
+            results.push((id, port, pid))
         }
 
         Ok(results)
@@ -170,6 +165,6 @@ impl PgCtl {
     }
 }
 
-fn join_str<'a, S: Into<&'a str>>(directory: &Path, name: S) -> String {
-    directory.join(name.into()).to_string_lossy().into_owned()
+fn join_str<'a, S: Into<&'a str>>(directory: &Path, id: S) -> String {
+    directory.join(id.into()).to_string_lossy().into_owned()
 }
