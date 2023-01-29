@@ -98,7 +98,7 @@ impl Instance {
             name: name.into(),
             state,
             conn_info: ConnectionInfo {
-                user: "".to_string(),
+                user: whoami::username(),
                 host: "127.0.0.1".to_string(),
                 port,
                 dbname: "postgres".to_string(),
@@ -133,7 +133,7 @@ fn list() -> Result<Json<ListResponse>> {
 #[get("/status/<name>", format = "json")]
 fn status(name: &str) -> Result<Json<Instance>> {
     let ctl = create_ctl();
-    let (port, pid) = ctl.get(name)?;
+    let (port, pid) = ctl.status(name)?;
     Ok(Json(Instance::new(name, port, pid)))
 }
 
@@ -151,7 +151,6 @@ fn create() -> Result<Json<InstanceId>> {
 #[post("/start", data = "<body>", format = "json")]
 fn start(body: Json<InstanceId>) -> Result<Json<Instance>> {
     let ctl = create_ctl();
-    let port: u32 = portpicker::pick_unused_port().unwrap().into();
 
     if !ctl.exists(&body.name) {
         return Err(ApiError::NotFound(InstanceId::json(&body.name)));
@@ -160,8 +159,8 @@ fn start(body: Json<InstanceId>) -> Result<Json<Instance>> {
     ctl.start(&body.name)?;
 
     match ctl.status(&body.name)? {
-        Some(pid) => Ok(Json(Instance::new(&body.name, port, Some(pid)))),
-        None => Err(ApiError::Internal(InternalError::json(format!(
+        (port, Some(pid)) => Ok(Json(Instance::new(&body.name, port, Some(pid)))),
+        (_, None) => Err(ApiError::Internal(InternalError::json(format!(
             "not running: {}",
             body.name
         )))),
@@ -185,7 +184,7 @@ fn fork(body: Json<InstanceId>) -> Result<Json<InstanceId>> {
         return Err(ApiError::NotFound(InstanceId::json(&body.name)));
     }
 
-    if let Some(_) = ctl.status(&body.name)? {
+    if let (_, Some(_)) = ctl.status(&body.name)? {
         return Err(ApiError::TemplateStillRunning(InstanceId::json(&body.name)));
     }
 
@@ -198,7 +197,7 @@ fn fork(body: Json<InstanceId>) -> Result<Json<InstanceId>> {
 fn destroy(body: Json<InstanceId>) -> Result<Json<()>> {
     let ctl = create_ctl();
 
-    if let Some(_) = ctl.status(&body.name)? {
+    if let (_, Some(_)) = ctl.status(&body.name)? {
         ctl.stop(&body.name)?;
     }
 

@@ -1,15 +1,15 @@
-interface ConnectionInfo {
+export interface ConnectionInfo {
   user: string;
   host: string;
   port: number;
   dbname: string;
 }
 
-interface ProcessInfo {
+export interface ProcessInfo {
   pid: number;
 }
 
-enum InstanceState {
+export enum InstanceState {
   Stopped,
   Running,
 }
@@ -32,14 +32,14 @@ interface RawInstance {
   proc_info?: ProcessInfo;
 }
 
-interface Instance {
+export interface Instance {
   name: string;
   state: InstanceState;
   connInfo: ConnectionInfo;
   procInfo?: ProcessInfo;
 }
 
-class QuickPgClient {
+export class QuickPgClient {
   constructor(readonly host: string) {}
 
   async list(): Promise<Instance[]> {
@@ -79,14 +79,73 @@ class QuickPgClient {
       procInfo: instance.proc_info,
     };
   }
-}
 
-const client = new QuickPgClient("127.0.0.1:8000");
+  async create(): Promise<string> {
+    const response = await fetch(`http://${this.host}/create`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json;charset=UTF-8",
+      },
+    });
 
-const instances = await client.list();
-console.dir(instances);
+    const { name } = await response.json() as { name: string };
+    return name;
+  }
 
-if (instances.length > 0) {
-  const instance = await client.status(instances[0].name);
-  console.dir(instance);
+  async start(name: string): Promise<Instance> {
+    const response = await fetch(`http://${this.host}/start`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json;charset=UTF-8",
+      },
+      body: JSON.stringify({ name }),
+    });
+
+    const instance = await response.json() as RawInstance;
+
+    return {
+      name: instance.name,
+      state: parseState(instance.state),
+      connInfo: instance.conn_info,
+      procInfo: instance.proc_info,
+    };
+  }
+
+  async stop(name: string): Promise<void> {
+    const response = await fetch(`http://${this.host}/stop`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json;charset=UTF-8",
+      },
+      body: JSON.stringify({ name }),
+    });
+
+    await response.json();
+  }
+
+  async fork(template: string): Promise<Instance> {
+    const response = await fetch(`http://${this.host}/fork`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json;charset=UTF-8",
+      },
+      body: JSON.stringify({ name: template }),
+    });
+
+    const { name } = await response.json() as { name: string };
+
+    return await this.status(name);
+  }
+
+  async destroy(name: string): Promise<void> {
+    const response = await fetch(`http://${this.host}/destroy`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json;charset=UTF-8",
+      },
+      body: JSON.stringify({ name }),
+    });
+
+    await response.json();
+  }
 }

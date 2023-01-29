@@ -93,22 +93,23 @@ impl PgCtl {
         PgCtl::check_output(&output)
     }
 
-    pub fn status(&self, name: &str) -> Result<Option<u32>> {
+    pub fn status(&self, name: &str) -> Result<(u32, Option<u32>)> {
+        let port = config::read_port(&self.data.join(name).join("postgresql.conf"))?;
+
         let output = Command::new(&self.binary)
             .args(["--pgdata", &join_str(&self.data, name), "status"])
             .output()?;
-
         let stdout = str::from_utf8(&output.stdout).unwrap().to_string();
 
         if stdout.starts_with("pg_ctl: no server running") {
-            return Ok(None);
+            return Ok((port, None));
         }
 
         PgCtl::check_output(&output)?;
 
         let re = Regex::new(r"\(PID: (\d+)\)").unwrap();
         match re.captures(&stdout) {
-            Some(caps) => Ok(Some(caps[1].parse::<u32>().unwrap())),
+            Some(caps) => Ok((port, Some(caps[1].parse::<u32>().unwrap()))),
             None => Err(Error::InvalidOutput(stdout)),
         }
     }
@@ -145,19 +146,13 @@ impl PgCtl {
         Ok(())
     }
 
-    pub fn get(&self, name: &str) -> Result<(u32, Option<u32>)> {
-        let port = config::read_port(&self.data.join(name).join("postgresql.conf"))?;
-        let pid = self.status(&name)?;
-        Ok((port, pid))
-    }
-
     pub fn list(&self) -> Result<Vec<(String, u32, Option<u32>)>> {
         let mut results = vec![];
 
         for entry in fs::read_dir(&self.data)? {
             let entry = entry?;
             let name = entry.file_name().to_string_lossy().into_owned();
-            let (port, pid) = self.get(&name)?;
+            let (port, pid) = self.status(&name)?;
             results.push((name, port, pid))
         }
 
