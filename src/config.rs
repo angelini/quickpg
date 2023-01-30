@@ -1,11 +1,7 @@
-use std::{
-    fmt,
-    fs::File,
-    io::{self, LineWriter, Write},
-    path::Path,
-};
+use std::{fmt, io, path::Path};
 
 use byte_unit::Byte;
+use rocket::tokio::{self, io::AsyncWriteExt};
 
 enum Value<'a> {
     Byte(Byte),
@@ -60,16 +56,15 @@ pub struct Config<'a> {
 }
 
 impl<'a> Config<'a> {
-    pub fn to_file(&self, path: &Path) -> io::Result<()> {
-        let file = File::create(path)?;
-        let mut file = LineWriter::new(file);
+    pub async fn to_file(&self, path: &Path) -> io::Result<()> {
+        let mut file = tokio::fs::File::create(path).await?;
 
         for row in self.to_strings() {
-            file.write_all(&row.as_bytes())?;
-            file.write_all(b"\n")?;
+            file.write_all(&row.as_bytes()).await?;
+            file.write_all(b"\n").await?;
         }
 
-        file.flush()?;
+        file.flush().await?;
         Ok(())
     }
 

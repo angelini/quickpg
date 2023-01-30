@@ -1,17 +1,16 @@
 use std::{
-    env,
-    fs::{self, File},
-    io,
+    env, fs, io,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
     process::{Command, Output},
     str,
 };
 
+use async_recursion::async_recursion;
 use regex::Regex;
 use rocket::{
     serde::{Deserialize, Serialize},
-    tokio,
+    tokio::{self, io::AsyncWriteExt},
 };
 use tokio_postgres::{self, Config, NoTls};
 
@@ -78,15 +77,19 @@ struct Metadata {
 }
 
 impl Metadata {
-    fn to_file(&self, path: &Path) -> io::Result<()> {
-        let file = File::create(path)?;
-        serde_json::to_writer(io::BufWriter::new(file), self)?;
+    async fn to_file(&self, path: &Path) -> io::Result<()> {
+        let serialized = serde_json::to_vec(self)?;
+
+        let mut file = tokio::fs::File::create(path).await?;
+        file.write_all(&serialized).await?;
+        file.flush().await?;
+
         Ok(())
     }
 
-    fn from_file(path: &Path) -> io::Result<Metadata> {
-        let file = File::open(path)?;
-        Ok(serde_json::from_reader(io::BufReader::new(file))?)
+    async fn from_file(path: &Path) -> io::Result<Metadata> {
+        let content = tokio::fs::read_to_string(path).await?;
+        Ok(serde_json::from_str(&content)?)
     }
 }
 
@@ -118,13 +121,15 @@ impl PgCtl {
         PgCtl::check_output(&output)?;
 
         conf.to_config()
-            .to_file(&self.data.join(id).join("postgresql.conf"))?;
+            .to_file(&self.data.join(id).join("postgresql.conf"))
+            .await?;
 
         let meta = Metadata {
             dbname: dbname.to_string(),
             port: conf.port,
         };
-        meta.to_file(&self.data.join(id).join("quickpg.json"))?;
+        meta.to_file(&self.data.join(id).join("quickpg.json"))
+            .await?;
 
         self.start(id)?;
 
@@ -158,8 +163,8 @@ impl PgCtl {
         PgCtl::check_output(&output)
     }
 
-    pub fn status(&self, id: &str) -> Result<Status> {
-        let meta = Metadata::from_file(&self.data.join(id).join("quickpg.json"))?;
+    pub async fn status(&self, id: &str) -> Result<Status> {
+        let meta = Metadata::from_file(&self.data.join(id).join("quickpg.json")).await?;
 
         let output = Command::new(&self.binary)
             .args(["--pgdata", &join_str(&self.data, id), "status"])
@@ -192,45 +197,47 @@ impl PgCtl {
         PgCtl::check_output(&output)
     }
 
-    pub fn fork(
+    pub async fn fork<'a>(
         &self,
         template: &str,
         target: &str,
         dbname: &str,
-        conf: &PostgresqlConf,
+        conf: &PostgresqlConf<'a>,
     ) -> Result<()> {
-        copy_recursively(self.data.join(template), self.data.join(target))?;
+        copy_recursively(self.data.join(template), self.data.join(target)).await?;
 
         conf.to_config()
-            .to_file(&self.data.join(target).join("postgresql.conf"))?;
+            .to_file(&self.data.join(target).join("postgresql.conf"))
+            .await?;
 
         let meta = Metadata {
             dbname: dbname.to_string(),
             port: conf.port,
         };
-        meta.to_file(&self.data.join(target).join("quickpg.json"))?;
+        meta.to_file(&self.data.join(target).join("quickpg.json"))
+            .await?;
 
         return Ok(());
     }
 
-    pub fn destroy(&self, id: &str) -> Result<()> {
+    pub async fn destroy(&self, id: &str) -> Result<()> {
         let log = self.logs.join(format!("{}.log", id));
 
-        fs::remove_dir_all(self.data.join(id))?;
+        tokio::fs::remove_dir_all(self.data.join(id)).await?;
         if log.is_file() {
-            fs::remove_file(self.logs.join(format!("{}.log", id)))?;
+            tokio::fs::remove_file(self.logs.join(format!("{}.log", id))).await?;
         }
 
         Ok(())
     }
 
-    pub fn list(&self) -> Result<Vec<Status>> {
+    pub async fn list(&self) -> Result<Vec<Status>> {
+        let mut dir = tokio::fs::read_dir(&self.data).await?;
         let mut results = vec![];
 
-        for entry in fs::read_dir(&self.data)? {
-            let entry = entry?;
+        while let Some(entry) = dir.next_entry().await? {
             let id = entry.file_name().to_string_lossy().into_owned();
-            let status = self.status(&id)?;
+            let status = self.status(&id).await?;
             results.push(status)
         }
 
@@ -276,17 +283,19 @@ fn join_str<'a, S: Into<&'a str>>(directory: &Path, id: S) -> String {
     directory.join(id.into()).to_string_lossy().into_owned()
 }
 
-pub fn copy_recursively(source: impl AsRef<Path>, destination: impl AsRef<Path>) -> io::Result<()> {
-    fs::create_dir_all(&destination)?;
-    fs::set_permissions(&destination, fs::Permissions::from_mode(0o700))?;
+#[async_recursion]
+pub async fn copy_recursively(source: PathBuf, destination: PathBuf) -> io::Result<()> {
+    tokio::fs::create_dir_all(&destination).await?;
+    tokio::fs::set_permissions(&destination, fs::Permissions::from_mode(0o700)).await?;
 
-    for entry in fs::read_dir(source)? {
-        let entry = entry?;
-        let filetype = entry.file_type()?;
+    let mut dir = tokio::fs::read_dir(source).await?;
+
+    while let Some(entry) = dir.next_entry().await? {
+        let filetype = entry.file_type().await?;
         if filetype.is_dir() {
-            copy_recursively(entry.path(), destination.as_ref().join(entry.file_name()))?;
+            copy_recursively(entry.path(), destination.join(entry.file_name())).await?;
         } else {
-            fs::copy(entry.path(), destination.as_ref().join(entry.file_name()))?;
+            tokio::fs::copy(entry.path(), destination.join(entry.file_name())).await?;
         }
     }
     Ok(())
