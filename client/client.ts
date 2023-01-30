@@ -43,14 +43,11 @@ export class QuickPgClient {
   constructor(readonly host: string) {}
 
   async list(): Promise<Instance[]> {
-    const response = await fetch(`http://${this.host}/`, {
-      method: "GET",
-      headers: {
-        "content-type": "application/json;charset=UTF-8",
-      },
-    });
-
-    const { instances } = await response.json() as { instances: RawInstance[] };
+    const { instances } = await this.api<{ instances: RawInstance[] }>(
+      "GET",
+      "",
+      null,
+    );
 
     return instances.map((instance) => {
       return {
@@ -63,14 +60,7 @@ export class QuickPgClient {
   }
 
   async status(id: string): Promise<Instance> {
-    const response = await fetch(`http://${this.host}/status/${id}`, {
-      method: "GET",
-      headers: {
-        "content-type": "application/json;charset=UTF-8",
-      },
-    });
-
-    const instance = await response.json() as RawInstance;
+    const instance = await this.api<RawInstance>("GET", `status/${id}`, null);
 
     return {
       id: instance.id,
@@ -80,28 +70,27 @@ export class QuickPgClient {
     };
   }
 
-  async create(): Promise<string> {
-    const response = await fetch(`http://${this.host}/create`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json;charset=UTF-8",
-      },
-    });
+  async create(dbname: string): Promise<Instance> {
+    const instance = await this.api<RawInstance>(
+      "POST",
+      "create",
+      JSON.stringify({ dbname }),
+    );
 
-    const { id } = await response.json() as { id: string };
-    return id;
+    return {
+      id: instance.id,
+      state: parseState(instance.state),
+      connInfo: instance.conn_info,
+      procInfo: instance.proc_info,
+    };
   }
 
   async start(id: string): Promise<Instance> {
-    const response = await fetch(`http://${this.host}/start`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json;charset=UTF-8",
-      },
-      body: JSON.stringify({ id }),
-    });
-
-    const instance = await response.json() as RawInstance;
+    const instance = await this.api<RawInstance>(
+      "POST",
+      "start",
+      JSON.stringify({ id }),
+    );
 
     return {
       id: instance.id,
@@ -112,40 +101,46 @@ export class QuickPgClient {
   }
 
   async stop(id: string): Promise<void> {
-    const response = await fetch(`http://${this.host}/stop`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json;charset=UTF-8",
-      },
-      body: JSON.stringify({ id }),
-    });
-
-    await response.json();
+    await this.api<{ id: string }>(
+      "POST",
+      "stop",
+      JSON.stringify({ id }),
+    );
   }
 
   async fork(template: string): Promise<Instance> {
-    const response = await fetch(`http://${this.host}/fork`, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json;charset=UTF-8",
-      },
-      body: JSON.stringify({ id: template }),
-    });
-
-    const { id } = await response.json() as { id: string };
+    const { id } = await this.api<{ id: string }>(
+      "POST",
+      "fork",
+      JSON.stringify({ id: template }),
+    );
 
     return await this.status(id);
   }
 
   async destroy(id: string): Promise<void> {
-    const response = await fetch(`http://${this.host}/destroy`, {
-      method: "POST",
+    return await this.api("POST", "destroy", JSON.stringify({ id }));
+  }
+
+  async api<T>(
+    method: string,
+    endpoint: string,
+    body: string | null,
+  ): Promise<T> {
+    const response = await fetch(`http://${this.host}/${endpoint}`, {
+      method,
       headers: {
         "content-type": "application/json;charset=UTF-8",
       },
-      body: JSON.stringify({ id }),
+      body,
     });
 
-    await response.json();
+    if (!response.ok) {
+      throw new Error(
+        `${response.status}: ${(await response.text())}`,
+      );
+    }
+
+    return response.json() as T;
   }
 }

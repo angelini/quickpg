@@ -1,7 +1,7 @@
 use std::{
     fmt,
     fs::File,
-    io::{self, BufRead, LineWriter, Write},
+    io::{self, LineWriter, Write},
     path::Path,
 };
 
@@ -84,7 +84,7 @@ impl<'a> Config<'a> {
 #[derive(Debug)]
 pub struct PostgresqlConf<'a> {
     listen_addresses: &'a str,
-    port: u32,
+    pub port: u32,
     max_connections: u32,
     shared_buffers: Byte,
     max_wal_size: Byte,
@@ -128,24 +128,4 @@ impl<'a> PostgresqlConf<'a> {
             ],
         }
     }
-}
-
-pub fn read_port(path: &Path) -> io::Result<u32> {
-    let file = File::open(path)?;
-    for line in io::BufReader::new(file).lines() {
-        let line = line?;
-        if line.starts_with("port = ") {
-            return line
-                .strip_prefix("port = ")
-                .unwrap()
-                .parse::<u32>()
-                .map_err(|_| {
-                    io::Error::new(io::ErrorKind::InvalidData, "cannot parse port value")
-                });
-        }
-    }
-    Err(io::Error::new(
-        io::ErrorKind::InvalidData,
-        "port config missing",
-    ))
 }

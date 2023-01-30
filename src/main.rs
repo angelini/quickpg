@@ -3,6 +3,7 @@ extern crate rocket;
 
 use std::path::Path;
 
+use pg_ctl::Status;
 use portpicker;
 use rand::distributions::{Alphanumeric, DistString};
 use rocket::{
@@ -23,6 +24,12 @@ impl InstanceId {
     fn json(id: impl Into<String>) -> Json<InstanceId> {
         Json(InstanceId { id: id.into() })
     }
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(crate = "rocket::serde")]
+struct InstanceDescriptor {
+    dbname: String,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -89,27 +96,27 @@ struct Instance {
 }
 
 impl Instance {
-    fn new(id: impl Into<String>, port: u32, pid: Option<u32>) -> Instance {
-        let state = match pid {
+    fn new(user: impl Into<String>, status: Status) -> Instance {
+        let state = match status.pid {
             Some(_) => InstanceState::Running,
             None => InstanceState::Stopped,
         };
         Instance {
-            id: id.into(),
+            id: status.id,
             state,
             conn_info: ConnectionInfo {
-                user: whoami::username(),
+                user: user.into(),
                 host: "127.0.0.1".to_string(),
-                port,
-                dbname: "postgres".to_string(),
+                port: status.port,
+                dbname: status.dbname,
             },
-            proc_info: pid.map(|p| ProcessInfo { pid: p }),
+            proc_info: status.pid.map(|p| ProcessInfo { pid: p }),
         }
     }
 }
 
 fn create_ctl() -> pg_ctl::PgCtl {
-    pg_ctl::PgCtl::new(Path::new(""))
+    pg_ctl::PgCtl::new(whoami::username(), Path::new(""))
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -125,7 +132,7 @@ fn list() -> Result<Json<ListResponse>> {
     Ok(Json(ListResponse {
         instances: instances
             .into_iter()
-            .map(|(id, port, pid)| Instance::new(id, port, pid))
+            .map(|status| Instance::new(&ctl.user, status))
             .collect(),
     }))
 }
@@ -133,19 +140,27 @@ fn list() -> Result<Json<ListResponse>> {
 #[get("/status/<id>", format = "json")]
 fn status(id: &str) -> Result<Json<Instance>> {
     let ctl = create_ctl();
-    let (port, pid) = ctl.status(id)?;
-    Ok(Json(Instance::new(id, port, pid)))
+    Ok(Json(Instance::new(&ctl.user, ctl.status(id)?)))
 }
 
-#[post("/create", format = "json")]
-fn create() -> Result<Json<InstanceId>> {
+#[post("/create", data = "<body>", format = "json")]
+async fn create(body: Json<InstanceDescriptor>) -> Result<Json<Instance>> {
     let ctl = create_ctl();
     let port: u32 = portpicker::pick_unused_port().unwrap().into();
     let id = Alphanumeric.sample_string(&mut rand::thread_rng(), 12);
 
-    ctl.init(&id, &config::PostgresqlConf::default(port))?;
+    ctl.init(&id, &body.dbname, &config::PostgresqlConf::default(port))
+        .await?;
 
-    Ok(InstanceId::json(id))
+    let status = ctl.status(&id)?;
+    if !status.is_running() {
+        return Err(ApiError::Internal(InternalError::json(format!(
+            "did not start: {}",
+            id
+        ))));
+    }
+
+    Ok(Json(Instance::new(&ctl.user, status)))
 }
 
 #[post("/start", data = "<body>", format = "json")]
@@ -158,13 +173,15 @@ fn start(body: Json<InstanceId>) -> Result<Json<Instance>> {
 
     ctl.start(&body.id)?;
 
-    match ctl.status(&body.id)? {
-        (port, Some(pid)) => Ok(Json(Instance::new(&body.id, port, Some(pid)))),
-        (_, None) => Err(ApiError::Internal(InternalError::json(format!(
+    let status = ctl.status(&body.id)?;
+    if !status.is_running() {
+        return Err(ApiError::Internal(InternalError::json(format!(
             "not running: {}",
             body.id
-        )))),
+        ))));
     }
+
+    Ok(Json(Instance::new(&ctl.user, status)))
 }
 
 #[post("/stop", data = "<body>", format = "json")]
@@ -184,11 +201,17 @@ fn fork(body: Json<InstanceId>) -> Result<Json<InstanceId>> {
         return Err(ApiError::NotFound(InstanceId::json(&body.id)));
     }
 
-    if let (_, Some(_)) = ctl.status(&body.id)? {
+    let status = ctl.status(&body.id)?;
+    if status.is_running() {
         return Err(ApiError::TemplateStillRunning(InstanceId::json(&body.id)));
     }
 
-    ctl.fork(&body.id, &id, &config::PostgresqlConf::default(port))?;
+    ctl.fork(
+        &body.id,
+        &id,
+        &status.dbname,
+        &config::PostgresqlConf::default(port),
+    )?;
 
     Ok(InstanceId::json(id))
 }
@@ -197,7 +220,8 @@ fn fork(body: Json<InstanceId>) -> Result<Json<InstanceId>> {
 fn destroy(body: Json<InstanceId>) -> Result<Json<()>> {
     let ctl = create_ctl();
 
-    if let (_, Some(_)) = ctl.status(&body.id)? {
+    let status = ctl.status(&body.id)?;
+    if status.is_running() {
         ctl.stop(&body.id)?;
     }
 

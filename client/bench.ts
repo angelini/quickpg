@@ -3,13 +3,11 @@ import { setupSchema } from "./fixture.ts";
 
 const client = new QuickPgClient("127.0.0.1:8000");
 
-const id = await client.create();
+const instance = await client.create("example");
+console.dir(instance);
 
 try {
-  const instance = await client.start(id);
-  console.dir(instance);
-
   await setupSchema(instance.connInfo);
 } finally {
-  await client.destroy(id);
+  await client.destroy(instance.id);
 }

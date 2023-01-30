@@ -11,11 +11,14 @@ main() {
     curl -fsS 127.0.0.1:8000 | jq .
 
     log "Create instance"
-    local template=$(curl -fsS -XPOST -d '{}' -H 'Content-Type: application/json' 127.0.0.1:8000/create | jq -r '.id')
+    local template=$(curl -fsS -XPOST -d "{\"dbname\": \"example\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/create | jq -r '.id')
     log "  > created: ${template}"
 
+    log "Stop instance"
+    curl -fsS -XPOST -d "{\"id\": \"${template}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/stop > /dev/null
+
     log "Fork instance"
-    local target=$(curl -fsS -XPOST -d "{\"id\": \"${template}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/create | jq -r '.id')
+    local target=$(curl -fsS -XPOST -d "{\"id\": \"${template}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/fork | jq -r '.id')
     log "  > created: ${target}"
 
     log "Start instance"
