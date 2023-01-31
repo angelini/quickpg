@@ -8,18 +8,16 @@ use std::{
 
 use async_recursion::async_recursion;
 use regex::Regex;
-use rocket::{
-    serde::{Deserialize, Serialize},
-    tokio::{self, io::AsyncWriteExt},
-};
+use serde::{Deserialize, Serialize};
+use tokio::{self, io::AsyncWriteExt};
 use tokio_postgres::{self, Config, NoTls};
 
 use crate::config::PostgresqlConf;
 
-#[derive(Debug, Responder)]
+#[derive(Debug)]
 pub enum Error {
     Io(io::Error),
-    Postgres(String),
+    Postgres(tokio_postgres::Error),
     CliError(String),
     InvalidOutput(String),
 }
@@ -32,7 +30,7 @@ impl From<io::Error> for Error {
 
 impl From<tokio_postgres::Error> for Error {
     fn from(err: tokio_postgres::Error) -> Self {
-        Error::Postgres(format!("{}", err))
+        Error::Postgres(err)
     }
 }
 

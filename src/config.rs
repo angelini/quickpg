@@ -1,7 +1,7 @@
 use std::{fmt, io, path::Path};
 
 use byte_unit::Byte;
-use rocket::tokio::{self, io::AsyncWriteExt};
+use tokio::{self, io::AsyncWriteExt};
 
 enum Value<'a> {
     Byte(Byte),

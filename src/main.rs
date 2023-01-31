@@ -1,16 +1,17 @@
-#[macro_use]
-extern crate rocket;
+mod config;
+mod pg_ctl;
 
 use std::path::Path;
 
-use pg_ctl::Status;
+use axum::{
+    extract::Path as UriPath, http::StatusCode, response::IntoResponse, routing, Json, Router,
+};
 use portpicker;
 use rand::distributions::{Alphanumeric, DistString};
-use rocket::{response::Responder, serde::json::Json};
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 
-mod config;
-mod pg_ctl;
+use pg_ctl::Status;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct InstanceId {
@@ -41,19 +42,36 @@ impl InternalError {
     }
 }
 
-#[derive(Debug, Responder)]
+#[derive(Debug)]
 enum ApiError {
-    #[response(status = 500, content_type = "json")]
     Internal(Json<InternalError>),
-    #[response(status = 404, content_type = "json")]
     NotFound(Json<InstanceId>),
-    #[response(status = 502, content_type = "json")]
     TemplateStillRunning(Json<InstanceId>),
 }
 
 impl From<pg_ctl::Error> for ApiError {
     fn from(err: pg_ctl::Error) -> Self {
         ApiError::Internal(InternalError::json(format!("pg_ctl: {:?}", err)))
+    }
+}
+
+impl IntoResponse for ApiError {
+    fn into_response(self) -> axum::response::Response {
+        let (status, message) = match &self {
+            ApiError::Internal(err) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Internal error: {}", err.message),
+            ),
+            ApiError::NotFound(id) => (StatusCode::NOT_FOUND, format!("Not found: {}", id.id)),
+            ApiError::TemplateStillRunning(id) => (
+                StatusCode::BAD_REQUEST,
+                format!("Instance {} is still running", id.id),
+            ),
+        };
+
+        let body = Json(json!({ "error": message }));
+
+        (status, body).into_response()
     }
 }
 
@@ -115,7 +133,6 @@ struct ListResponse {
     instances: Vec<Instance>,
 }
 
-#[get("/", format = "json")]
 async fn list() -> Result<Json<ListResponse>> {
     let ctl = create_ctl();
     let instances = ctl.list().await?;
@@ -127,13 +144,11 @@ async fn list() -> Result<Json<ListResponse>> {
     }))
 }
 
-#[get("/status/<id>", format = "json")]
-async fn status(id: &str) -> Result<Json<Instance>> {
+async fn status(id: UriPath<String>) -> Result<Json<Instance>> {
     let ctl = create_ctl();
-    Ok(Json(Instance::new(&ctl.user, ctl.status(id).await?)))
+    Ok(Json(Instance::new(&ctl.user, ctl.status(&id).await?)))
 }
 
-#[post("/create", data = "<body>", format = "json")]
 async fn create(body: Json<InstanceDescriptor>) -> Result<Json<Instance>> {
     let ctl = create_ctl();
     let port: u32 = portpicker::pick_unused_port().unwrap().into();
@@ -153,7 +168,6 @@ async fn create(body: Json<InstanceDescriptor>) -> Result<Json<Instance>> {
     Ok(Json(Instance::new(&ctl.user, status)))
 }
 
-#[post("/start", data = "<body>", format = "json")]
 async fn start(body: Json<InstanceId>) -> Result<Json<Instance>> {
     let ctl = create_ctl();
 
@@ -174,14 +188,12 @@ async fn start(body: Json<InstanceId>) -> Result<Json<Instance>> {
     Ok(Json(Instance::new(&ctl.user, status)))
 }
 
-#[post("/stop", data = "<body>", format = "json")]
-fn stop(body: Json<InstanceId>) -> Result<Json<()>> {
+async fn stop(body: Json<InstanceId>) -> Result<Json<()>> {
     let ctl = create_ctl();
     ctl.stop(&body.id)?;
     Ok(Json(()))
 }
 
-#[post("/fork", data = "<body>", format = "json")]
 async fn fork(body: Json<InstanceId>) -> Result<Json<InstanceId>> {
     let ctl = create_ctl();
     let port: u32 = portpicker::pick_unused_port().unwrap().into();
@@ -207,7 +219,6 @@ async fn fork(body: Json<InstanceId>) -> Result<Json<InstanceId>> {
     Ok(InstanceId::json(id))
 }
 
-#[post("/destroy", data = "<body>", format = "json")]
 async fn destroy(body: Json<InstanceId>) -> Result<Json<()>> {
     let ctl = create_ctl();
 
@@ -220,10 +231,19 @@ async fn destroy(body: Json<InstanceId>) -> Result<Json<()>> {
     Ok(Json(()))
 }
 
-#[launch]
-fn rocket() -> _ {
-    rocket::build().mount(
-        "/",
-        routes![list, status, create, start, stop, fork, destroy],
-    )
+#[tokio::main]
+async fn main() {
+    let app = Router::new()
+        .route("/", routing::get(list))
+        .route("/status/:id", routing::get(status))
+        .route("/create", routing::post(create))
+        .route("/start", routing::post(start))
+        .route("/stop", routing::post(stop))
+        .route("/fork", routing::post(fork))
+        .route("/destroy", routing::post(destroy));
+
+    axum::Server::bind(&"0.0.0.0:8000".parse().unwrap())
+        .serve(app.into_make_service())
+        .await
+        .unwrap();
 }
