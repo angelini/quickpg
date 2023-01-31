@@ -2,14 +2,14 @@ use std::{
     env, fs, io,
     os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
-    process::{Command, Output},
+    process::Output,
     str,
 };
 
 use async_recursion::async_recursion;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use tokio::{self, io::AsyncWriteExt};
+use tokio::{self, io::AsyncWriteExt, process::Command};
 use tokio_postgres::{self, Config, NoTls};
 
 use crate::config::PostgresqlConf;
@@ -114,7 +114,8 @@ impl PgCtl {
     pub async fn init<'a>(&self, id: &str, dbname: &str, conf: &PostgresqlConf<'a>) -> Result<()> {
         let output = Command::new(&self.binary)
             .args(["--pgdata", &join_str(&self.data, id), "-o--no-sync", "init"])
-            .output()?;
+            .output()
+            .await?;
 
         PgCtl::check_output(&output)?;
 
@@ -129,7 +130,7 @@ impl PgCtl {
         meta.to_file(&self.data.join(id).join("quickpg.json"))
             .await?;
 
-        self.start(id)?;
+        self.start(id).await?;
 
         PgCtl::create_database(dbname, &self.user, conf.port).await?;
 
@@ -140,7 +141,7 @@ impl PgCtl {
         self.data.join(id).is_dir()
     }
 
-    pub fn start(&self, id: &str) -> Result<()> {
+    pub async fn start(&self, id: &str) -> Result<()> {
         let absolute_sockets = env::current_dir()?
             .join(&self.sockets)
             .to_string_lossy()
@@ -156,7 +157,8 @@ impl PgCtl {
                 &format!("-k{}", absolute_sockets),
                 "start",
             ])
-            .output()?;
+            .output()
+            .await?;
 
         PgCtl::check_output(&output)
     }
@@ -166,7 +168,8 @@ impl PgCtl {
 
         let output = Command::new(&self.binary)
             .args(["--pgdata", &join_str(&self.data, id), "status"])
-            .output()?;
+            .output()
+            .await?;
         let stdout = str::from_utf8(&output.stdout).unwrap().to_string();
 
         if stdout.starts_with("pg_ctl: no server running") {
@@ -187,10 +190,11 @@ impl PgCtl {
         }
     }
 
-    pub fn stop(&self, id: &str) -> Result<()> {
+    pub async fn stop(&self, id: &str) -> Result<()> {
         let output = Command::new(&self.binary)
             .args(["--pgdata", &join_str(&self.data, id), "stop"])
-            .output()?;
+            .output()
+            .await?;
 
         PgCtl::check_output(&output)
     }

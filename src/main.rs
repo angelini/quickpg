@@ -171,7 +171,7 @@ async fn start(Path(id): Path<String>) -> Result<Json<Instance>> {
         return Err(ApiError::NotFound(InstanceId::json(id)));
     }
 
-    ctl.start(&id)?;
+    ctl.start(&id).await?;
 
     let status = ctl.status(&id).await?;
     if !status.is_running() {
@@ -186,7 +186,7 @@ async fn start(Path(id): Path<String>) -> Result<Json<Instance>> {
 
 async fn stop(Path(id): Path<String>) -> Result<Json<()>> {
     let ctl = create_ctl();
-    ctl.stop(&id)?;
+    ctl.stop(&id).await?;
     Ok(Json(()))
 }
 
@@ -220,7 +220,7 @@ async fn destroy(Path(id): Path<String>) -> Result<Json<()>> {
 
     let status = ctl.status(&id).await?;
     if status.is_running() {
-        ctl.stop(&id)?;
+        ctl.stop(&id).await?;
     }
 
     ctl.destroy(&id).await?;
