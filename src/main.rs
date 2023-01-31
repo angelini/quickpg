@@ -1,11 +1,7 @@
 mod config;
 mod pg_ctl;
 
-use std::path::Path;
-
-use axum::{
-    extract::Path as UriPath, http::StatusCode, response::IntoResponse, routing, Json, Router,
-};
+use axum::{extract::Path, http::StatusCode, response::IntoResponse, routing, Json, Router};
 use portpicker;
 use rand::distributions::{Alphanumeric, DistString};
 use serde::{Deserialize, Serialize};
@@ -125,7 +121,7 @@ impl Instance {
 }
 
 fn create_ctl() -> pg_ctl::PgCtl {
-    pg_ctl::PgCtl::new(whoami::username(), Path::new(""))
+    pg_ctl::PgCtl::new(whoami::username(), std::path::Path::new(""))
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -142,11 +138,6 @@ async fn list() -> Result<Json<ListResponse>> {
             .map(|status| Instance::new(&ctl.user, status))
             .collect(),
     }))
-}
-
-async fn status(id: UriPath<String>) -> Result<Json<Instance>> {
-    let ctl = create_ctl();
-    Ok(Json(Instance::new(&ctl.user, ctl.status(&id).await?)))
 }
 
 async fn create(body: Json<InstanceDescriptor>) -> Result<Json<Instance>> {
@@ -168,48 +159,53 @@ async fn create(body: Json<InstanceDescriptor>) -> Result<Json<Instance>> {
     Ok(Json(Instance::new(&ctl.user, status)))
 }
 
-async fn start(body: Json<InstanceId>) -> Result<Json<Instance>> {
+async fn status(Path(id): Path<String>) -> Result<Json<Instance>> {
+    let ctl = create_ctl();
+    Ok(Json(Instance::new(&ctl.user, ctl.status(&id).await?)))
+}
+
+async fn start(Path(id): Path<String>) -> Result<Json<Instance>> {
     let ctl = create_ctl();
 
-    if !ctl.exists(&body.id) {
-        return Err(ApiError::NotFound(InstanceId::json(&body.id)));
+    if !ctl.exists(&id) {
+        return Err(ApiError::NotFound(InstanceId::json(id)));
     }
 
-    ctl.start(&body.id)?;
+    ctl.start(&id)?;
 
-    let status = ctl.status(&body.id).await?;
+    let status = ctl.status(&id).await?;
     if !status.is_running() {
         return Err(ApiError::Internal(InternalError::json(format!(
             "not running: {}",
-            body.id
+            id
         ))));
     }
 
     Ok(Json(Instance::new(&ctl.user, status)))
 }
 
-async fn stop(body: Json<InstanceId>) -> Result<Json<()>> {
+async fn stop(Path(id): Path<String>) -> Result<Json<()>> {
     let ctl = create_ctl();
-    ctl.stop(&body.id)?;
+    ctl.stop(&id)?;
     Ok(Json(()))
 }
 
-async fn fork(body: Json<InstanceId>) -> Result<Json<InstanceId>> {
+async fn fork(Path(template): Path<String>) -> Result<Json<InstanceId>> {
     let ctl = create_ctl();
     let port: u32 = portpicker::pick_unused_port().unwrap().into();
     let id = Alphanumeric.sample_string(&mut rand::thread_rng(), 12);
 
-    if !ctl.exists(&body.id) {
-        return Err(ApiError::NotFound(InstanceId::json(&body.id)));
+    if !ctl.exists(&template) {
+        return Err(ApiError::NotFound(InstanceId::json(&id)));
     }
 
-    let status = ctl.status(&body.id).await?;
+    let status = ctl.status(&template).await?;
     if status.is_running() {
-        return Err(ApiError::TemplateStillRunning(InstanceId::json(&body.id)));
+        return Err(ApiError::TemplateStillRunning(InstanceId::json(&template)));
     }
 
     ctl.fork(
-        &body.id,
+        &template,
         &id,
         &status.dbname,
         &config::PostgresqlConf::default(port),
@@ -219,28 +215,28 @@ async fn fork(body: Json<InstanceId>) -> Result<Json<InstanceId>> {
     Ok(InstanceId::json(id))
 }
 
-async fn destroy(body: Json<InstanceId>) -> Result<Json<()>> {
+async fn destroy(Path(id): Path<String>) -> Result<Json<()>> {
     let ctl = create_ctl();
 
-    let status = ctl.status(&body.id).await?;
+    let status = ctl.status(&id).await?;
     if status.is_running() {
-        ctl.stop(&body.id)?;
+        ctl.stop(&id)?;
     }
 
-    ctl.destroy(&body.id).await?;
+    ctl.destroy(&id).await?;
     Ok(Json(()))
 }
 
 #[tokio::main]
 async fn main() {
     let app = Router::new()
-        .route("/", routing::get(list))
-        .route("/status/:id", routing::get(status))
-        .route("/create", routing::post(create))
-        .route("/start", routing::post(start))
-        .route("/stop", routing::post(stop))
-        .route("/fork", routing::post(fork))
-        .route("/destroy", routing::post(destroy));
+        .route("/pg/instance", routing::get(list))
+        .route("/pg/instance", routing::post(create))
+        .route("/pg/instance/:id", routing::get(status))
+        .route("/pg/instance/:id/start", routing::post(start))
+        .route("/pg/instance/:id/stop", routing::post(stop))
+        .route("/pg/instance/:id/fork", routing::post(fork))
+        .route("/pg/instance/:id", routing::delete(destroy));
 
     axum::Server::bind(&"0.0.0.0:8000".parse().unwrap())
         .serve(app.into_make_service())

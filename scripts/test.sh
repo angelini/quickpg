@@ -8,21 +8,21 @@ log() {
 
 main() {
     log "Initial state"
-    curl -fsS 127.0.0.1:8000 | jq .
+    curl -fsS 127.0.0.1:8000/pg/instance | jq .
 
     log "Create instance"
-    local template=$(curl -fsS -XPOST -d "{\"dbname\": \"example\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/create | jq -r '.id')
+    local template=$(curl -fsS -XPOST -d "{\"dbname\": \"example\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/pg/instance | jq -r '.id')
     log "  > created: ${template}"
 
     log "Stop instance"
-    curl -fsS -XPOST -d "{\"id\": \"${template}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/stop > /dev/null
+    curl -fsS -XPOST "127.0.0.1:8000/pg/instance/${template}/stop" > /dev/null
 
     log "Fork instance"
-    local target=$(curl -fsS -XPOST -d "{\"id\": \"${template}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/fork | jq -r '.id')
+    local target=$(curl -fsS -XPOST 127.0.0.1:8000/pg/instance/${template}/fork | jq -r '.id')
     log "  > created: ${target}"
 
     log "Start instance"
-    curl -sS --fail-with-body -XPOST -d "{\"id\": \"${target}\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/start | jq .
+    curl -sS --fail-with-body -XPOST "127.0.0.1:8000/pg/instance/${target}/start" | jq .
 }
 
 main "$@"

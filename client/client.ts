@@ -45,7 +45,7 @@ export class QuickPgClient {
   async list(): Promise<Instance[]> {
     const { instances } = await this.api<{ instances: RawInstance[] }>(
       "GET",
-      "",
+      "pg/instance",
       null,
     );
 
@@ -59,8 +59,12 @@ export class QuickPgClient {
     });
   }
 
-  async status(id: string): Promise<Instance> {
-    const instance = await this.api<RawInstance>("GET", `status/${id}`, null);
+  async create(dbname: string): Promise<Instance> {
+    const instance = await this.api<RawInstance>(
+      "POST",
+      "pg/instance",
+      JSON.stringify({ dbname }),
+    );
 
     return {
       id: instance.id,
@@ -70,11 +74,11 @@ export class QuickPgClient {
     };
   }
 
-  async create(dbname: string): Promise<Instance> {
+  async status(id: string): Promise<Instance> {
     const instance = await this.api<RawInstance>(
-      "POST",
-      "create",
-      JSON.stringify({ dbname }),
+      "GET",
+      `pg/instance/${id}`,
+      null,
     );
 
     return {
@@ -88,8 +92,8 @@ export class QuickPgClient {
   async start(id: string): Promise<Instance> {
     const instance = await this.api<RawInstance>(
       "POST",
-      "start",
-      JSON.stringify({ id }),
+      `pg/instance/${id}/start`,
+      null,
     );
 
     return {
@@ -101,25 +105,25 @@ export class QuickPgClient {
   }
 
   async stop(id: string): Promise<void> {
-    await this.api<{ id: string }>(
+    await this.api(
       "POST",
-      "stop",
-      JSON.stringify({ id }),
+      `pg/instance/${id}/stop`,
+      null,
     );
   }
 
   async fork(template: string): Promise<Instance> {
     const { id } = await this.api<{ id: string }>(
       "POST",
-      "fork",
-      JSON.stringify({ id: template }),
+      `pg/instance/${template}/fork`,
+      null,
     );
 
     return await this.status(id);
   }
 
   async destroy(id: string): Promise<void> {
-    return await this.api("POST", "destroy", JSON.stringify({ id }));
+    return await this.api("DELETE", `pg/instance/${id}`, null);
   }
 
   async api<T>(
