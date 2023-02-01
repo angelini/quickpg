@@ -20,6 +20,7 @@ pub enum Error {
     Postgres(tokio_postgres::Error),
     CliError(String),
     InvalidOutput(String),
+    DataDirNotFound(PathBuf),
 }
 
 impl From<io::Error> for Error {
@@ -164,7 +165,12 @@ impl PgCtl {
     }
 
     pub async fn status(&self, id: &str) -> Result<Status> {
-        let meta = Metadata::from_file(&self.data.join(id).join("quickpg.json")).await?;
+        let data = self.data.join(id);
+        if !data.is_dir() {
+            return Err(Error::DataDirNotFound(data));
+        }
+
+        let meta = Metadata::from_file(&data.join("quickpg.json")).await?;
 
         let output = Command::new(&self.binary)
             .args(["--pgdata", &join_str(&self.data, id), "status"])
@@ -206,7 +212,11 @@ impl PgCtl {
         dbname: &str,
         conf: &PostgresqlConf<'a>,
     ) -> Result<()> {
-        copy_recursively(self.data.join(template), self.data.join(target)).await?;
+        let template_data = self.data.join(template);
+        if !template_data.is_dir() {
+            return Err(Error::DataDirNotFound(template_data));
+        }
+        copy_recursively(template_data, self.data.join(target)).await?;
 
         conf.to_config()
             .to_file(&self.data.join(target).join("postgresql.conf"))
@@ -219,13 +229,18 @@ impl PgCtl {
         meta.to_file(&self.data.join(target).join("quickpg.json"))
             .await?;
 
-        return Ok(());
+        return self.start(target).await;
     }
 
     pub async fn destroy(&self, id: &str) -> Result<()> {
-        let log = self.logs.join(format!("{}.log", id));
+        let data = self.data.join(id);
+        if !data.is_dir() {
+            return Err(Error::DataDirNotFound(data));
+        }
 
-        tokio::fs::remove_dir_all(self.data.join(id)).await?;
+        tokio::fs::remove_dir_all(data).await?;
+
+        let log = self.logs.join(format!("{}.log", id));
         if log.is_file() {
             tokio::fs::remove_file(self.logs.join(format!("{}.log", id))).await?;
         }

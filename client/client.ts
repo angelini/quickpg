@@ -39,6 +39,15 @@ export interface Instance {
   procInfo?: ProcessInfo;
 }
 
+const parseInstance = (raw: RawInstance): Instance => {
+  return {
+    id: raw.id,
+    state: parseState(raw.state),
+    connInfo: raw.conn_info,
+    procInfo: raw.proc_info,
+  };
+};
+
 export class QuickPgClient {
   constructor(readonly host: string) {}
 
@@ -49,14 +58,7 @@ export class QuickPgClient {
       null,
     );
 
-    return instances.map((instance) => {
-      return {
-        id: instance.id,
-        state: parseState(instance.state),
-        connInfo: instance.conn_info,
-        procInfo: instance.proc_info,
-      };
-    });
+    return instances.map(parseInstance);
   }
 
   async create(dbname: string): Promise<Instance> {
@@ -66,12 +68,7 @@ export class QuickPgClient {
       JSON.stringify({ dbname }),
     );
 
-    return {
-      id: instance.id,
-      state: parseState(instance.state),
-      connInfo: instance.conn_info,
-      procInfo: instance.proc_info,
-    };
+    return parseInstance(instance);
   }
 
   async status(id: string): Promise<Instance> {
@@ -81,12 +78,7 @@ export class QuickPgClient {
       null,
     );
 
-    return {
-      id: instance.id,
-      state: parseState(instance.state),
-      connInfo: instance.conn_info,
-      procInfo: instance.proc_info,
-    };
+    return parseInstance(instance);
   }
 
   async start(id: string): Promise<Instance> {
@@ -96,12 +88,7 @@ export class QuickPgClient {
       null,
     );
 
-    return {
-      id: instance.id,
-      state: parseState(instance.state),
-      connInfo: instance.conn_info,
-      procInfo: instance.proc_info,
-    };
+    return parseInstance(instance);
   }
 
   async stop(id: string): Promise<void> {
@@ -113,13 +100,13 @@ export class QuickPgClient {
   }
 
   async fork(template: string): Promise<Instance> {
-    const { id } = await this.api<{ id: string }>(
+    const instance = await this.api<RawInstance>(
       "POST",
       `pg/instance/${template}/fork`,
       null,
     );
 
-    return await this.status(id);
+    return parseInstance(instance);
   }
 
   async destroy(id: string): Promise<void> {
@@ -145,6 +132,9 @@ export class QuickPgClient {
       );
     }
 
-    return response.json() as T;
+    const r = await response.json() as T;
+    console.log(method, endpoint);
+    console.dir(r);
+    return r;
   }
 }

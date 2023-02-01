@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 use pg_ctl::Status;
+use tower_http::trace::TraceLayer;
 
 #[derive(Debug, Deserialize, Serialize)]
 struct InstanceId {
@@ -25,40 +26,32 @@ struct InstanceDescriptor {
     dbname: String,
 }
 
-#[derive(Debug, Deserialize, Serialize)]
-struct InternalError {
-    message: String,
-}
-
-impl InternalError {
-    fn json(message: impl Into<String>) -> Json<InternalError> {
-        Json(InternalError {
-            message: message.into(),
-        })
-    }
-}
-
 #[derive(Debug)]
 enum ApiError {
-    Internal(Json<InternalError>),
+    PgCtl(pg_ctl::Error),
     NotFound(Json<InstanceId>),
+    FailedToStart(Json<InstanceId>),
     TemplateStillRunning(Json<InstanceId>),
 }
 
 impl From<pg_ctl::Error> for ApiError {
     fn from(err: pg_ctl::Error) -> Self {
-        ApiError::Internal(InternalError::json(format!("pg_ctl: {:?}", err)))
+        ApiError::PgCtl(err)
     }
 }
 
 impl IntoResponse for ApiError {
     fn into_response(self) -> axum::response::Response {
         let (status, message) = match &self {
-            ApiError::Internal(err) => (
+            ApiError::PgCtl(err) => (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Internal error: {}", err.message),
+                format!("pg_ctl: {:?}", err),
             ),
             ApiError::NotFound(id) => (StatusCode::NOT_FOUND, format!("Not found: {}", id.id)),
+            ApiError::FailedToStart(id) => (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Instance {} failed to start", id.id),
+            ),
             ApiError::TemplateStillRunning(id) => (
                 StatusCode::BAD_REQUEST,
                 format!("Instance {} is still running", id.id),
@@ -150,10 +143,7 @@ async fn create(body: Json<InstanceDescriptor>) -> Result<Json<Instance>> {
 
     let status = ctl.status(&id).await?;
     if !status.is_running() {
-        return Err(ApiError::Internal(InternalError::json(format!(
-            "did not start: {}",
-            id
-        ))));
+        return Err(ApiError::FailedToStart(InstanceId::json(id)));
     }
 
     Ok(Json(Instance::new(&ctl.user, status)))
@@ -175,10 +165,7 @@ async fn start(Path(id): Path<String>) -> Result<Json<Instance>> {
 
     let status = ctl.status(&id).await?;
     if !status.is_running() {
-        return Err(ApiError::Internal(InternalError::json(format!(
-            "not running: {}",
-            id
-        ))));
+        return Err(ApiError::FailedToStart(InstanceId::json(id)));
     }
 
     Ok(Json(Instance::new(&ctl.user, status)))
@@ -190,7 +177,7 @@ async fn stop(Path(id): Path<String>) -> Result<Json<()>> {
     Ok(Json(()))
 }
 
-async fn fork(Path(template): Path<String>) -> Result<Json<InstanceId>> {
+async fn fork(Path(template): Path<String>) -> Result<Json<Instance>> {
     let ctl = create_ctl();
     let port: u32 = portpicker::pick_unused_port().unwrap().into();
     let id = Alphanumeric.sample_string(&mut rand::thread_rng(), 12);
@@ -212,7 +199,12 @@ async fn fork(Path(template): Path<String>) -> Result<Json<InstanceId>> {
     )
     .await?;
 
-    Ok(InstanceId::json(id))
+    let status = ctl.status(&id).await?;
+    if !status.is_running() {
+        return Err(ApiError::FailedToStart(InstanceId::json(id)));
+    }
+
+    Ok(Json(Instance::new(&ctl.user, status)))
 }
 
 async fn destroy(Path(id): Path<String>) -> Result<Json<()>> {
@@ -229,6 +221,8 @@ async fn destroy(Path(id): Path<String>) -> Result<Json<()>> {
 
 #[tokio::main]
 async fn main() {
+    env_logger::init();
+
     let app = Router::new()
         .route("/pg/instance", routing::get(list))
         .route("/pg/instance", routing::post(create))
@@ -236,7 +230,8 @@ async fn main() {
         .route("/pg/instance/:id/start", routing::post(start))
         .route("/pg/instance/:id/stop", routing::post(stop))
         .route("/pg/instance/:id/fork", routing::post(fork))
-        .route("/pg/instance/:id", routing::delete(destroy));
+        .route("/pg/instance/:id", routing::delete(destroy))
+        .layer(TraceLayer::new_for_http());
 
     axum::Server::bind(&"0.0.0.0:8000".parse().unwrap())
         .serve(app.into_make_service())
