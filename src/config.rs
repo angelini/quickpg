@@ -120,6 +120,12 @@ impl<'a> PostgresqlConf<'a> {
                 KeyVal::str("lc_numeric", self.locale),
                 KeyVal::str("lc_time", self.locale),
                 KeyVal::str("default_text_search_config", "pg_catalog.english"),
+                // Crash unsafe performance settings
+                KeyVal::str("fsync", "off"),
+                KeyVal::str("full_page_writes", "off"),
+                KeyVal::str("synchronous_commit", "off"),
+                KeyVal::str("wal_level", "minimal"),
+                KeyVal::int("max_wal_senders", 0),
             ],
         }
     }
