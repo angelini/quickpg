@@ -55,7 +55,6 @@ export class QuickPgClient {
     const { instances } = await this.api<{ instances: RawInstance[] }>(
       "GET",
       "pg/instance",
-      null,
     );
 
     return instances.map(parseInstance);
@@ -75,7 +74,6 @@ export class QuickPgClient {
     const instance = await this.api<RawInstance>(
       "GET",
       `pg/instance/${id}`,
-      null,
     );
 
     return parseInstance(instance);
@@ -85,7 +83,6 @@ export class QuickPgClient {
     const instance = await this.api<RawInstance>(
       "POST",
       `pg/instance/${id}/start`,
-      null,
     );
 
     return parseInstance(instance);
@@ -95,7 +92,6 @@ export class QuickPgClient {
     await this.api(
       "POST",
       `pg/instance/${id}/stop`,
-      null,
     );
   }
 
@@ -103,20 +99,19 @@ export class QuickPgClient {
     const instance = await this.api<RawInstance>(
       "POST",
       `pg/instance/${template}/fork`,
-      null,
     );
 
     return parseInstance(instance);
   }
 
   async destroy(id: string): Promise<void> {
-    return await this.api("DELETE", `pg/instance/${id}`, null);
+    return await this.api("DELETE", `pg/instance/${id}`);
   }
 
   async api<T>(
     method: string,
     endpoint: string,
-    body: string | null,
+    body?: string,
   ): Promise<T> {
     const response = await fetch(`http://${this.host}/${endpoint}`, {
       method,

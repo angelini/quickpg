@@ -175,21 +175,25 @@ impl PgCtl {
         }
 
         let content = tokio::fs::read_to_string(&pidfile).await?;
-        let pid_end_index = content
-            .find("\n")
-            .ok_or_else(|| Error::InvalidPidFile(pidfile.clone()))?;
-        let pid = content[0..pid_end_index]
-            .parse::<u32>()
-            .map_err(|_| Error::InvalidPidFile(pidfile.clone()))?;
 
-        Ok(Status::running(id, meta.dbname, meta.port, pid))
+        if let Some(pid_end_index) = content.find("\n") {
+            if let Ok(pid) = content[0..pid_end_index].parse::<u32>() {
+                return Ok(Status::running(id, meta.dbname, meta.port, pid));
+            }
+        }
+
+        Err(Error::InvalidPidFile(pidfile))
     }
 
-    pub async fn stop(&self, id: &str) -> Result<()> {
-        let output = Command::new(&self.binary)
-            .args(["--pgdata", &join_str(&self.data, id), "stop"])
-            .output()
-            .await?;
+    pub async fn stop(&self, id: &str, wait: bool) -> Result<()> {
+        let data = join_str(&self.data, id);
+        let mut args = vec!["--pgdata", &data];
+        if !wait {
+            args.push("--no-wait");
+        }
+        args.push("stop");
+
+        let output = Command::new(&self.binary).args(args).output().await?;
 
         PgCtl::check_output(&output)
     }

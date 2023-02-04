@@ -174,7 +174,7 @@ async fn start(Path(id): Path<String>) -> Result<Json<Instance>> {
 
 async fn stop(Path(id): Path<String>) -> Result<Json<()>> {
     let ctl = create_ctl();
-    ctl.stop(&id).await?;
+    ctl.stop(&id, true).await?;
     Ok(Json(()))
 }
 
@@ -213,7 +213,7 @@ async fn destroy(Path(id): Path<String>) -> Result<Json<()>> {
 
     let status = ctl.status(&id).await?;
     if status.is_running() {
-        ctl.stop(&id).await?;
+        ctl.stop(&id, false).await?;
     }
 
     ctl.destroy(&id).await?;
