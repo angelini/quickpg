@@ -5,7 +5,6 @@ use std::{
     str,
 };
 
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::{self, io::AsyncWriteExt, process::Command};
 use tokio_postgres::{self, Config, NoTls};
@@ -17,7 +16,7 @@ pub enum Error {
     Io(io::Error),
     Postgres(tokio_postgres::Error),
     CliError(String),
-    InvalidOutput(String),
+    InvalidPidFile(PathBuf),
     DataDirNotFound(PathBuf),
 }
 
@@ -170,28 +169,20 @@ impl PgCtl {
 
         let meta = Metadata::from_file(&data.join("quickpg.json")).await?;
 
-        let output = Command::new(&self.binary)
-            .args(["--pgdata", &join_str(&self.data, id), "status"])
-            .output()
-            .await?;
-        let stdout = str::from_utf8(&output.stdout).unwrap().to_string();
-
-        if stdout.starts_with("pg_ctl: no server running") {
+        let pidfile = data.join("postmaster.pid");
+        if !pidfile.is_file() {
             return Ok(Status::stopped(id, meta.dbname, meta.port));
         }
 
-        PgCtl::check_output(&output)?;
+        let content = tokio::fs::read_to_string(&pidfile).await?;
+        let pid_end_index = content
+            .find("\n")
+            .ok_or_else(|| Error::InvalidPidFile(pidfile.clone()))?;
+        let pid = content[0..pid_end_index]
+            .parse::<u32>()
+            .map_err(|_| Error::InvalidPidFile(pidfile.clone()))?;
 
-        let re = Regex::new(r"\(PID: (\d+)\)").unwrap();
-        match re.captures(&stdout) {
-            Some(caps) => Ok(Status::running(
-                id,
-                meta.dbname,
-                meta.port,
-                caps[1].parse::<u32>().unwrap(),
-            )),
-            None => Err(Error::InvalidOutput(stdout)),
-        }
+        Ok(Status::running(id, meta.dbname, meta.port, pid))
     }
 
     pub async fn stop(&self, id: &str) -> Result<()> {
