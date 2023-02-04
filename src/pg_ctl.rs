@@ -161,6 +161,11 @@ impl PgCtl {
         PgCtl::check_output(&output)
     }
 
+    pub fn is_running(&self, id: &str) -> bool {
+        let pidfile = self.data.join(id).join("postmaster.pid");
+        pidfile.is_file()
+    }
+
     pub async fn status(&self, id: &str) -> Result<Status> {
         let data = self.data.join(id);
         if !data.is_dir() {

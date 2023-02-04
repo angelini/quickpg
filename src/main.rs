@@ -180,22 +180,23 @@ async fn stop(Path(id): Path<String>) -> Result<Json<()>> {
 
 async fn fork(Path(template): Path<String>) -> Result<Json<Instance>> {
     let ctl = create_ctl();
+
+    if !ctl.exists(&template) {
+        return Err(ApiError::NotFound(InstanceId::json(&template)));
+    }
+
     let port: u32 = portpicker::pick_unused_port().unwrap().into();
     let id = Alphanumeric.sample_string(&mut rand::thread_rng(), 12);
 
-    if !ctl.exists(&template) {
-        return Err(ApiError::NotFound(InstanceId::json(&id)));
-    }
-
-    let status = ctl.status(&template).await?;
-    if status.is_running() {
+    let template_status = ctl.status(&template).await?;
+    if template_status.is_running() {
         return Err(ApiError::TemplateStillRunning(InstanceId::json(&template)));
     }
 
     ctl.fork(
         &template,
         &id,
-        &status.dbname,
+        &template_status.dbname,
         &config::PostgresqlConf::default(port),
     )
     .await?;
@@ -211,8 +212,7 @@ async fn fork(Path(template): Path<String>) -> Result<Json<Instance>> {
 async fn destroy(Path(id): Path<String>) -> Result<Json<()>> {
     let ctl = create_ctl();
 
-    let status = ctl.status(&id).await?;
-    if status.is_running() {
+    if ctl.is_running(&id) {
         ctl.stop(&id, false).await?;
     }
 
