@@ -1,18 +1,16 @@
 use std::{
-    env, fs, io,
-    os::unix::fs::PermissionsExt,
+    env, io,
     path::{Path, PathBuf},
     process::Output,
     str,
 };
 
-use async_recursion::async_recursion;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tokio::{self, io::AsyncWriteExt, process::Command};
 use tokio_postgres::{self, Config, NoTls};
 
-use crate::config::PostgresqlConf;
+use crate::{config::PostgresqlConf, copy};
 
 #[derive(Debug)]
 pub enum Error {
@@ -216,7 +214,7 @@ impl PgCtl {
         if !template_data.is_dir() {
             return Err(Error::DataDirNotFound(template_data));
         }
-        copy_recursively(template_data, self.data.join(target)).await?;
+        copy::copy_pgdata(template_data, self.data.join(target)).await?;
 
         conf.to_config()
             .to_file(&self.data.join(target).join("postgresql.conf"))
@@ -298,22 +296,4 @@ impl PgCtl {
 
 fn join_str<'a, S: Into<&'a str>>(directory: &Path, id: S) -> String {
     directory.join(id.into()).to_string_lossy().into_owned()
-}
-
-#[async_recursion]
-pub async fn copy_recursively(source: PathBuf, destination: PathBuf) -> io::Result<()> {
-    tokio::fs::create_dir_all(&destination).await?;
-    tokio::fs::set_permissions(&destination, fs::Permissions::from_mode(0o700)).await?;
-
-    let mut dir = tokio::fs::read_dir(source).await?;
-
-    while let Some(entry) = dir.next_entry().await? {
-        let filetype = entry.file_type().await?;
-        if filetype.is_dir() {
-            copy_recursively(entry.path(), destination.join(entry.file_name())).await?;
-        } else {
-            tokio::fs::copy(entry.path(), destination.join(entry.file_name())).await?;
-        }
-    }
-    Ok(())
 }

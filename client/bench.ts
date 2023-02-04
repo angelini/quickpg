@@ -69,13 +69,18 @@ try {
 }
 
 console.log("\n----------\n");
-
-console.log("Init:", formatEntries(performance.getEntriesByName("init")));
 console.log(
-  "Core Stop:",
+  "Init:        ",
+  formatEntries(performance.getEntriesByName("init")),
+);
+console.log(
+  "Core Stop:   ",
   formatEntries(performance.getEntriesByName("core-stop")),
 );
-console.log("Fork:", formatEntries(performance.getEntriesByName("fork")));
+console.log(
+  "Fork:        ",
+  formatEntries(performance.getEntriesByName("fork")),
+);
 console.log(
   "Destroy Fork:",
   formatEntries(performance.getEntriesByName("destroy-fork")),

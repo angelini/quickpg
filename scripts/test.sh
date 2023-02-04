@@ -8,7 +8,7 @@ log() {
 
 main() {
     log "Initial state"
-    curl -fsS 127.0.0.1:8000/pg/instance | jq .
+    curl -sS --fail-with-body 127.0.0.1:8000/pg/instance | jq .
 
     log "Create instance"
     local template=$(curl -fsS -XPOST -d "{\"dbname\": \"example\"}" -H 'Content-Type: application/json' 127.0.0.1:8000/pg/instance | jq -r '.id')
@@ -21,8 +21,8 @@ main() {
     local target=$(curl -fsS -XPOST 127.0.0.1:8000/pg/instance/${template}/fork | jq -r '.id')
     log "  > created: ${target}"
 
-    log "Start instance"
-    curl -sS --fail-with-body -XPOST "127.0.0.1:8000/pg/instance/${target}/start" | jq .
+    log "Final state"
+    curl -fsS 127.0.0.1:8000/pg/instance | jq .
 }
 
 main "$@"
